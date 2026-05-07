@@ -72,6 +72,20 @@ class _AuthScreenState extends State<AuthScreen> {
           behavior: SnackBarBehavior.floating,
         ),
       );
+    } catch (e) {
+      // Catch any non-FirebaseAuthException errors (network, platform, etc.)
+      // so the loading state is cleared and the user sees feedback instead of
+      // a stuck spinner.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Couldn't start guest session. Please check your connection and try again.",
+          ),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }

@@ -85,6 +85,10 @@ class AuthService {
         return 'Too many attempts. Please try again later.';
       case 'network-request-failed':
         return 'Network error. Check your connection.';
+      case 'operation-not-allowed':
+        return 'Guest sign-in is currently unavailable. Please try email sign-up instead.';
+      case 'admin-restricted-operation':
+        return 'Guest sign-in is restricted. Please create an account to continue.';
       default:
         return e.message ?? 'An error occurred. Please try again.';
     }

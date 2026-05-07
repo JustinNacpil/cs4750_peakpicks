@@ -1,9 +1,11 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/tier_list.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
+import 'onboarding_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -217,6 +219,80 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ── Rate the app on the Play Store ──────────────
+  Future<void> _rateApp() async {
+    // Prefer the Play Store app via the market:// scheme, fall back to https.
+    final marketUri = Uri.parse(
+        'market://details?id=com.peakpicks.app');
+    final webUri = Uri.parse(
+        'https://play.google.com/store/apps/details?id=com.peakpicks.app');
+    try {
+      final ok = await launchUrl(marketUri,
+          mode: LaunchMode.externalApplication);
+      if (!ok) {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {
+      try {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open the Play Store.'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  // ── Send feedback via email ─────────────────────
+  Future<void> _sendFeedback() async {
+    final mailto = Uri(
+      scheme: 'mailto',
+      path: 'feedback@peakpicks.app',
+      queryParameters: {
+        'subject': 'PeakPicks Feedback',
+        'body':
+            'Hi PeakPicks team,\n\nI\'d like to share some feedback / report a bug:\n\n',
+      },
+    );
+    try {
+      final ok = await launchUrl(mailto);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No email app found on this device.'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open email app.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // ── Re-show the onboarding walkthrough ──────────
+  Future<void> _viewWalkthrough() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const OnboardingScreen(fromSettings: true),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
   String _styleLabel(TierStyleType t) {
     switch (t) {
       case TierStyleType.worthIt: return 'Worth It';
@@ -415,6 +491,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                     const SizedBox(height: 32),
 
+                    // ── Settings section ─────────────────────
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('Settings',
+                          style: Theme.of(context).textTheme.titleMedium),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.divider),
+                      ),
+                      child: Column(
+                        children: [
+                          _SettingsTile(
+                            icon: Icons.star_rate_rounded,
+                            label: 'Rate Your App',
+                            subtitle: 'Enjoying PeakPicks? Leave a review!',
+                            onTap: _rateApp,
+                          ),
+                          const Divider(height: 1, color: AppColors.divider),
+                          _SettingsTile(
+                            icon: Icons.feedback_outlined,
+                            label: 'Send Feedback',
+                            subtitle: 'Report a bug or suggest a feature',
+                            onTap: _sendFeedback,
+                          ),
+                          const Divider(height: 1, color: AppColors.divider),
+                          _SettingsTile(
+                            icon: Icons.school_rounded,
+                            label: 'View Walkthrough',
+                            subtitle: 'Replay the new-user tutorial',
+                            onTap: _viewWalkthrough,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
                     // Sign out button
                     OutlinedButton.icon(
                       onPressed: _signOut,
@@ -510,6 +626,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SettingsTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final VoidCallback onTap;
+  const _SettingsTile({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: AppColors.accent, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textSecondary)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded,
+                color: AppColors.textSecondary, size: 20),
+          ],
+        ),
       ),
     );
   }
