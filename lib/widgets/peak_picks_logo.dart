@@ -1,37 +1,26 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 
-/// Tries to load the PNG logo from assets.
-/// Falls back to a gradient mountain icon + gradient text if the asset
-/// is missing (so the app never crashes during development).
+/// PeakPicks brand logo — icon + gradient wordmark, always centered.
 class PeakPicksLogo extends StatelessWidget {
   final double height;
   final bool showText;
   const PeakPicksLogo({super.key, this.height = 40, this.showText = true});
 
-  static const _gradient = LinearGradient(
-    colors: [Color(0xFF00E5A0), Color(0xFF56C8F5), Color(0xFFC97CFE)],
-  );
-
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Try asset image first, fall back to painted icon
-        _LogoIcon(size: height),
+        _PeakIcon(size: height * 1.4),
         if (showText) ...[
-          const SizedBox(width: 10),
-          ShaderMask(
-            shaderCallback: (bounds) => _gradient.createShader(bounds),
-            child: Text(
-              'PeakPicks',
-              style: TextStyle(
-                fontSize: height * 0.6,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-                letterSpacing: -0.5,
-              ),
+          const SizedBox(height: 8),
+          _GradientText(
+            'PeakPicks',
+            style: TextStyle(
+              fontSize: height * 0.65,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
             ),
           ),
         ],
@@ -40,41 +29,42 @@ class PeakPicksLogo extends StatelessWidget {
   }
 }
 
-/// Small version for nav bars, loading screens, etc.
+/// Smaller icon-only version for nav bars / loading screens.
 class PeakPicksIcon extends StatelessWidget {
   final double size;
   const PeakPicksIcon({super.key, this.size = 32});
 
   @override
-  Widget build(BuildContext context) {
-    return _LogoIcon(size: size);
-  }
+  Widget build(BuildContext context) => _PeakIcon(size: size);
 }
 
-/// Renders the mountain peak icon.
-/// Attempts to load assets/images/logo.png first; if that fails,
-/// paints a gradient mountain using CustomPaint.
-class _LogoIcon extends StatelessWidget {
-  final double size;
-  const _LogoIcon({required this.size});
+// ── Gradient wordmark ────────────────────────────────────────────────────────
+
+class _GradientText extends StatelessWidget {
+  final String text;
+  final TextStyle style;
+  const _GradientText(this.text, {required this.style});
+
+  static const _gradient = LinearGradient(
+    colors: [Color(0xFF00C896), Color(0xFF56C8F5), Color(0xFFB388FF)],
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+  );
 
   @override
   Widget build(BuildContext context) {
-    // Try the asset image
-    return Image.asset(
-      'assets/images/logo.png',
-      height: size,
-      width: size,
-      fit: BoxFit.contain,
-      errorBuilder: (_, __, ___) => _PaintedPeak(size: size),
+    return ShaderMask(
+      shaderCallback: (bounds) => _gradient.createShader(bounds),
+      child: Text(text, style: style.copyWith(color: Colors.white)),
     );
   }
 }
 
-/// Gradient mountain peak drawn with CustomPaint — used as fallback.
-class _PaintedPeak extends StatelessWidget {
+// ── Custom peak icon ─────────────────────────────────────────────────────────
+
+class _PeakIcon extends StatelessWidget {
   final double size;
-  const _PaintedPeak({required this.size});
+  const _PeakIcon({required this.size});
 
   @override
   Widget build(BuildContext context) {
@@ -87,44 +77,67 @@ class _PaintedPeak extends StatelessWidget {
 }
 
 class _PeakPainter extends CustomPainter {
+  static const _gradient1 = LinearGradient(
+    colors: [Color(0xFF00C896), Color(0xFF56C8F5)],
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+  );
+  static const _gradient2 = LinearGradient(
+    colors: [Color(0xFFB388FF), Color(0xFF7C4DFF)],
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+  );
+
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
+    final rect = Rect.fromLTWH(0, 0, w, h);
 
-    // Back mountain (purple-pink)
+    // ── Background circle ────────────────────────────────────────────────────
+    final bgPaint = Paint()
+      ..color = const Color(0xFF1C2128)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(w / 2, h / 2), w / 2, bgPaint);
+
+    // ── Back peak (purple) ───────────────────────────────────────────────────
     final backPath = Path()
-      ..moveTo(w * 0.15, h * 0.85)
-      ..lineTo(w * 0.55, h * 0.12)
-      ..lineTo(w * 0.92, h * 0.85)
+      ..moveTo(w * 0.20, h * 0.78)
+      ..lineTo(w * 0.58, h * 0.18)
+      ..lineTo(w * 0.88, h * 0.78)
       ..close();
-    final backPaint = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [Color(0xFFC97CFE), Color(0xFFAB47BC)],
-      ).createShader(Rect.fromLTWH(0, 0, w, h));
-    canvas.drawPath(backPath, backPaint);
+    canvas.drawPath(
+      backPath,
+      Paint()..shader = _gradient2.createShader(rect),
+    );
 
-    // Front mountain (teal-blue)
+    // ── Front peak (teal) ────────────────────────────────────────────────────
     final frontPath = Path()
-      ..moveTo(w * 0.05, h * 0.85)
-      ..lineTo(w * 0.42, h * 0.18)
-      ..lineTo(w * 0.78, h * 0.85)
+      ..moveTo(w * 0.10, h * 0.78)
+      ..lineTo(w * 0.42, h * 0.22)
+      ..lineTo(w * 0.74, h * 0.78)
       ..close();
-    final frontPaint = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [Color(0xFF00E5A0), Color(0xFF56C8F5)],
-      ).createShader(Rect.fromLTWH(0, 0, w, h));
-    canvas.drawPath(frontPath, frontPaint);
+    canvas.drawPath(
+      frontPath,
+      Paint()..shader = _gradient1.createShader(rect),
+    );
 
-    // Sparkle at peak
+    // ── Snow cap on front peak ───────────────────────────────────────────────
+    final snowPath = Path()
+      ..moveTo(w * 0.42, h * 0.22)
+      ..lineTo(w * 0.35, h * 0.40)
+      ..lineTo(w * 0.50, h * 0.40)
+      ..close();
+    canvas.drawPath(
+      snowPath,
+      Paint()..color = Colors.white.withValues(alpha: 0.90),
+    );
+
+    // ── Star / sparkle at tip ────────────────────────────────────────────────
     final sparklePaint = Paint()..color = Colors.white;
-    canvas.drawCircle(Offset(w * 0.42, h * 0.16), w * 0.025, sparklePaint);
+    canvas.drawCircle(Offset(w * 0.42, h * 0.20), w * 0.028, sparklePaint);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant CustomPainter old) => false;
 }

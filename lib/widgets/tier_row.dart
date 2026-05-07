@@ -173,21 +173,33 @@ class _Chip extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (item.imagePath != null)
+            if (item.displayImage != null)
               ClipRRect(
                 borderRadius:
                     const BorderRadius.vertical(top: Radius.circular(10)),
-                child: Image.file(
-                  File(item.imagePath!),
-                  height: 56, width: 90,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                    height: 56, width: 90,
-                    color: AppColors.surface,
-                    child: const Icon(Icons.broken_image_rounded,
-                        size: 22, color: AppColors.textSecondary),
-                  ),
-                ),
+                child: item.displayImage!.startsWith('http')
+                    ? Image.network(
+                        item.displayImage!,
+                        height: 56, width: 90,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          height: 56, width: 90,
+                          color: AppColors.surface,
+                          child: const Icon(Icons.broken_image_rounded,
+                              size: 22, color: AppColors.textSecondary),
+                        ),
+                      )
+                    : Image.file(
+                        File(item.displayImage!),
+                        height: 56, width: 90,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          height: 56, width: 90,
+                          color: AppColors.surface,
+                          child: const Icon(Icons.broken_image_rounded,
+                              size: 22, color: AppColors.textSecondary),
+                        ),
+                      ),
               ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),

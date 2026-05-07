@@ -59,7 +59,8 @@ class TierItem {
   String id;
   String name;
   String description;
-  String? imagePath;
+  String? imagePath;   // local file path (device cache)
+  String? imageUrl;    // local path or cloud URL
   DateTime createdAt;
 
   TierItem({
@@ -67,15 +68,20 @@ class TierItem {
     required this.name,
     this.description = '',
     this.imagePath,
+    this.imageUrl,
     DateTime? createdAt,
   })  : id = id ?? _uuid.v4(),
         createdAt = createdAt ?? DateTime.now();
+
+  /// The best image source to display: prefer cloud URL, fallback to local path.
+  String? get displayImage => imageUrl ?? imagePath;
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
         'description': description,
         'imagePath': imagePath,
+        'imageUrl': imageUrl,
         'createdAt': createdAt.toIso8601String(),
       };
 
@@ -84,8 +90,15 @@ class TierItem {
         name: j['name'],
         description: j['description'] ?? '',
         imagePath: j['imagePath'],
+        imageUrl: j['imageUrl'],
         createdAt: DateTime.parse(j['createdAt']),
       );
+
+  // Firestore-compatible map (same as toJson but explicit)
+  Map<String, dynamic> toFirestore() => toJson();
+
+  factory TierItem.fromFirestore(Map<String, dynamic> j) =>
+      TierItem.fromJson(j);
 }
 
 class Tier {
@@ -160,6 +173,7 @@ class TierList {
   List<BracketMatchup> bracketMatchups;
   DateTime createdAt;
   DateTime updatedAt;
+  String? userId; // Firebase Auth UID
 
   TierList({
     String? id,
@@ -171,6 +185,7 @@ class TierList {
     List<BracketMatchup>? bracketMatchups,
     DateTime? createdAt,
     DateTime? updatedAt,
+    this.userId,
   })  : id = id ?? _uuid.v4(),
         unrankedItems = unrankedItems ?? [],
         bracketMatchups = bracketMatchups ?? [],
@@ -187,6 +202,7 @@ class TierList {
         'bracketMatchups': bracketMatchups.map((m) => m.toJson()).toList(),
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
+        if (userId != null) 'userId': userId,
       };
 
   factory TierList.fromJson(Map<String, dynamic> j) => TierList(
@@ -205,6 +221,7 @@ class TierList {
             [],
         createdAt: DateTime.parse(j['createdAt']),
         updatedAt: DateTime.parse(j['updatedAt']),
+        userId: j['userId'],
       );
 
   /// Find a TierItem by id across all tiers and unranked

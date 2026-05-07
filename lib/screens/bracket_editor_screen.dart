@@ -3,10 +3,9 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as pp;
 import '../models/tier_list.dart';
-import '../services/storage_service.dart';
+import '../services/firestore_service.dart';
+import '../services/cloud_storage_service.dart';
 import '../theme/app_theme.dart';
 
 class BracketEditorScreen extends StatefulWidget {
@@ -35,8 +34,9 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
   }
 
   Future<void> _save() async {
-    _tl.updatedAt = DateTime.now();
-    await StorageService.saveSingle(_tl);
+    try {
+      await FirestoreService.saveSingle(_tl);
+    } catch (_) {}
   }
 
   List<TierItem> get _allContestants => _tl.unrankedItems;
@@ -44,7 +44,8 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
   Future<void> _addItem() async {
     final nameCtrl = TextEditingController();
     final descCtrl = TextEditingController();
-    String? imagePath;
+    String? imageUrl;
+    bool uploadingImage = false;
 
     final result = await showModalBottomSheet<TierItem>(
       context: context,
@@ -55,63 +56,86 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setSheetState) {
           return Padding(
-            padding: EdgeInsets.only(left: 20, right: 20, top: 20,
+            padding: EdgeInsets.only(
+              left: 20, right: 20, top: 20,
               bottom: MediaQuery.of(ctx).viewInsets.bottom + 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Center(child: Container(width: 40, height: 4,
-                  decoration: BoxDecoration(color: AppColors.textSecondary.withValues(alpha: 0.3),
+                  decoration: BoxDecoration(
+                    color: AppColors.textSecondary.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(2)))),
                 const SizedBox(height: 16),
                 Text('Add Contestant', style: Theme.of(context).textTheme.headlineMedium),
                 const SizedBox(height: 16),
                 GestureDetector(
-                  onTap: () async {
-                    final source = await showDialog<ImageSource>(context: ctx,
-                      builder: (c) => SimpleDialog(title: const Text('Choose Image'), children: [
-                        SimpleDialogOption(onPressed: () => Navigator.pop(c, ImageSource.camera),
-                          child: const Row(children: [Icon(Icons.camera_alt_rounded), SizedBox(width: 12), Text('Camera')])),
-                        SimpleDialogOption(onPressed: () => Navigator.pop(c, ImageSource.gallery),
-                          child: const Row(children: [Icon(Icons.photo_library_rounded), SizedBox(width: 12), Text('Gallery')])),
-                      ]));
+                  onTap: uploadingImage ? null : () async {
+                    final source = await showDialog<ImageSource>(
+                      context: ctx,
+                      builder: (c) => SimpleDialog(
+                        title: const Text('Choose Image'),
+                        children: [
+                          SimpleDialogOption(
+                            onPressed: () => Navigator.pop(c, ImageSource.camera),
+                            child: const Row(children: [Icon(Icons.camera_alt_rounded), SizedBox(width: 12), Text('Camera')])),
+                          SimpleDialogOption(
+                            onPressed: () => Navigator.pop(c, ImageSource.gallery),
+                            child: const Row(children: [Icon(Icons.photo_library_rounded), SizedBox(width: 12), Text('Gallery')])),
+                        ]));
                     if (source == null) return;
-                    final picked = await _picker.pickImage(source: source, maxWidth: 600);
+                    final picked = await _picker.pickImage(source: source, maxWidth: 800, imageQuality: 85);
                     if (picked != null) {
-                      final dir = await getApplicationDocumentsDirectory();
-                      final ext = pp.extension(picked.path);
-                      final dest = pp.join(dir.path, 'peakpicks_${DateTime.now().millisecondsSinceEpoch}$ext');
-                      await File(picked.path).copy(dest);
-                      setSheetState(() => imagePath = dest);
+                      setSheetState(() => uploadingImage = true);
+                      try {
+                        final url = await CloudStorageService.uploadItemImage(File(picked.path));
+                        setSheetState(() { imageUrl = url; uploadingImage = false; });
+                      } catch (_) {
+                        setSheetState(() => uploadingImage = false);
+                      }
                     }
                   },
-                  child: Container(height: 100, width: double.infinity,
-                    decoration: BoxDecoration(color: AppColors.surfaceLight,
-                      borderRadius: BorderRadius.circular(12),
-                      image: imagePath != null ? DecorationImage(image: FileImage(File(imagePath!)), fit: BoxFit.cover) : null),
-                    child: imagePath == null
-                      ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                          Icon(Icons.add_photo_alternate_rounded, size: 32, color: AppColors.textSecondary),
-                          const SizedBox(height: 4),
-                          Text('Tap to add image', style: Theme.of(context).textTheme.bodySmall)])
-                      : null),
+                  child: Container(
+                    height: 100, width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(12)),
+                    clipBehavior: Clip.antiAlias,
+                    child: uploadingImage
+                        ? const Center(child: CircularProgressIndicator())
+                        : imageUrl != null
+                            ? Image.file(File(imageUrl!), fit: BoxFit.cover,
+                                width: double.infinity, height: 100)
+                            : Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                Icon(Icons.add_photo_alternate_rounded, size: 32, color: AppColors.textSecondary),
+                                const SizedBox(height: 4),
+                                Text('Tap to add image', style: Theme.of(context).textTheme.bodySmall)])),
                 ),
                 const SizedBox(height: 12),
-                TextField(controller: nameCtrl, textCapitalization: TextCapitalization.words,
+                TextField(
+                  controller: nameCtrl,
+                  textCapitalization: TextCapitalization.words,
                   decoration: const InputDecoration(hintText: 'Contestant name')),
                 const SizedBox(height: 10),
-                TextField(controller: descCtrl, maxLines: 2,
+                TextField(
+                  controller: descCtrl,
+                  maxLines: 2,
                   decoration: const InputDecoration(hintText: 'Description (optional)')),
                 const SizedBox(height: 14),
-                SizedBox(width: double.infinity, height: 48,
+                SizedBox(
+                  width: double.infinity, height: 48,
                   child: ElevatedButton(
                     onPressed: () {
                       if (nameCtrl.text.trim().isEmpty) return;
-                      Navigator.pop(ctx, TierItem(name: nameCtrl.text.trim(),
-                        description: descCtrl.text.trim(), imagePath: imagePath));
+                      Navigator.pop(ctx, TierItem(
+                        name: nameCtrl.text.trim(),
+                        description: descCtrl.text.trim(),
+                        imageUrl: imageUrl,
+                      ));
                     },
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.accent,
                       foregroundColor: AppColors.background,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                     child: const Text('Add Contestant', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -147,11 +171,10 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
         round: 1,
       ));
     }
-    // If odd number, last item gets a bye (auto-advance)
     if (items.length.isOdd) {
       matchups.add(BracketMatchup(
         item1Id: items.last.id,
-        item2Id: items.last.id, // bye
+        item2Id: items.last.id,
         winnerId: items.last.id,
         round: 1,
       ));
@@ -168,44 +191,32 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
 
   void _pickWinner(BracketMatchup matchup, String winnerId) {
     HapticFeedback.mediumImpact();
-    setState(() {
-      matchup.winnerId = winnerId;
-    });
+    setState(() { matchup.winnerId = winnerId; });
 
-    // Check if all matchups in current round are decided
-    final currentMatchups = _tl.bracketMatchups.where((m) => m.round == _currentRound).toList();
+    final currentMatchups = _tl.bracketMatchups
+        .where((m) => m.round == _currentRound).toList();
     final allDecided = currentMatchups.every((m) => m.winnerId != null);
 
     if (allDecided) {
       final winners = currentMatchups.map((m) => m.winnerId!).toList();
       if (winners.length == 1) {
-        // Champion!
         setState(() => _championId = winners.first);
       } else {
-        // Create next round
         final nextRound = _currentRound + 1;
         final nextMatchups = <BracketMatchup>[];
         for (int i = 0; i < winners.length - 1; i += 2) {
           nextMatchups.add(BracketMatchup(
-            item1Id: winners[i],
-            item2Id: winners[i + 1],
-            round: nextRound,
-          ));
+            item1Id: winners[i], item2Id: winners[i + 1], round: nextRound));
         }
         if (winners.length.isOdd) {
           nextMatchups.add(BracketMatchup(
-            item1Id: winners.last,
-            item2Id: winners.last,
-            winnerId: winners.last,
-            round: nextRound,
-          ));
+            item1Id: winners.last, item2Id: winners.last,
+            winnerId: winners.last, round: nextRound));
         }
         setState(() {
           _tl.bracketMatchups.addAll(nextMatchups);
           _currentRound = nextRound;
         });
-
-        // Check again (byes can auto-complete a round)
         _checkAutoAdvance();
       }
     }
@@ -213,7 +224,8 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
   }
 
   void _checkAutoAdvance() {
-    final currentMatchups = _tl.bracketMatchups.where((m) => m.round == _currentRound).toList();
+    final currentMatchups = _tl.bracketMatchups
+        .where((m) => m.round == _currentRound).toList();
     final allDecided = currentMatchups.every((m) => m.winnerId != null);
     if (allDecided) {
       final winners = currentMatchups.map((m) => m.winnerId!).toList();
@@ -225,13 +237,14 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
 
   void _checkChampion() {
     final maxRound = _tl.bracketMatchups.map((m) => m.round).reduce(max);
-    final lastRoundMatchups = _tl.bracketMatchups.where((m) => m.round == maxRound).toList();
+    final lastRoundMatchups = _tl.bracketMatchups
+        .where((m) => m.round == maxRound).toList();
     if (lastRoundMatchups.length == 1 && lastRoundMatchups.first.winnerId != null) {
       _championId = lastRoundMatchups.first.winnerId;
     }
   }
 
-  void _resetBracket() async {
+  Future<void> _resetBracket() async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -239,7 +252,8 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
         content: const Text('Start over with a new bracket? All matchup results will be cleared.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(c, true),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
             style: TextButton.styleFrom(foregroundColor: AppColors.error),
             child: const Text('Reset')),
         ],
@@ -263,10 +277,12 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
         title: Text(_tl.title),
         actions: [
           if (!_bracketStarted)
-            IconButton(icon: const Icon(Icons.add_circle_outline_rounded),
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline_rounded),
               onPressed: _addItem),
           if (_bracketStarted)
-            IconButton(icon: const Icon(Icons.refresh_rounded),
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded),
               tooltip: 'Reset Bracket',
               onPressed: _resetBracket),
         ],
@@ -274,7 +290,8 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
       body: _bracketStarted ? _buildBracketView() : _buildSetupView(),
       floatingActionButton: _bracketStarted
           ? null
-          : FloatingActionButton(onPressed: _addItem,
+          : FloatingActionButton(
+              onPressed: _addItem,
               child: const Icon(Icons.add_rounded)),
     );
   }
@@ -289,7 +306,6 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
             Text(_tl.description, style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 16),
           ],
-          // Header
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -355,7 +371,8 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
   }
 
   Widget _buildBracketView() {
-    final roundMatchups = _tl.bracketMatchups.where((m) => m.round == _currentRound).toList();
+    final roundMatchups = _tl.bracketMatchups
+        .where((m) => m.round == _currentRound).toList();
     final undecided = roundMatchups.where((m) => m.winnerId == null).toList();
 
     return SingleChildScrollView(
@@ -363,12 +380,10 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Champion banner
           if (_championId != null) ...[
             _buildChampionBanner(),
             const SizedBox(height: 20),
           ],
-          // Round indicator
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
@@ -378,11 +393,10 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
             child: Text(
               _championId != null ? 'Final Results' : 'Round $_currentRound',
               style: const TextStyle(
-                color: AppColors.accent, fontWeight: FontWeight.w700, fontSize: 14),
+                  color: AppColors.accent, fontWeight: FontWeight.w700, fontSize: 14),
             ),
           ),
           const SizedBox(height: 16),
-          // Current matchups
           if (_championId == null && undecided.isNotEmpty)
             ...undecided.map((m) => _buildMatchupCard(m))
           else if (_championId == null)
@@ -391,13 +405,13 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
               child: Text('Advancing to next round...',
                   style: TextStyle(color: AppColors.textSecondary)),
             ),
-          // Completed matchups in this round
           if (roundMatchups.where((m) => m.winnerId != null).isNotEmpty) ...[
             const SizedBox(height: 16),
-            Text('Completed', style: TextStyle(fontSize: 12,
-                color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+            const Text('Completed', style: TextStyle(
+                fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
-            ...roundMatchups.where((m) => m.winnerId != null && m.item1Id != m.item2Id)
+            ...roundMatchups
+                .where((m) => m.winnerId != null && m.item1Id != m.item2Id)
                 .map((m) => _buildCompletedMatchup(m)),
           ],
         ],
@@ -408,6 +422,7 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
   Widget _buildChampionBanner() {
     final champ = _tl.findItem(_championId!);
     if (champ == null) return const SizedBox();
+    final img = champ.displayImage;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -424,11 +439,12 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
             fontSize: 12, fontWeight: FontWeight.w800,
             color: Color(0xFFFFD700), letterSpacing: 2)),
           const SizedBox(height: 10),
-          if (champ.imagePath != null)
+          if (img != null)
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.file(File(champ.imagePath!),
-                height: 80, width: 80, fit: BoxFit.cover),
+              child: img.startsWith('http')
+                  ? Image.network(img, height: 80, width: 80, fit: BoxFit.cover)
+                  : Image.file(File(img), height: 80, width: 80, fit: BoxFit.cover),
             ),
           const SizedBox(height: 10),
           Text(champ.name, style: Theme.of(context).textTheme.headlineMedium),
@@ -478,6 +494,7 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
   }
 
   Widget _buildContestantButton(TierItem item, BracketMatchup matchup) {
+    final img = item.displayImage;
     return GestureDetector(
       onTap: () => _pickWinner(matchup, item.id),
       child: Container(
@@ -489,31 +506,36 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
         ),
         child: Column(
           children: [
-            if (item.imagePath != null)
+            if (img != null)
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.file(File(item.imagePath!),
-                  height: 60, width: double.infinity, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(height: 60,
-                    color: AppColors.surface,
-                    child: const Icon(Icons.broken_image_rounded, size: 24))),
+                child: img.startsWith('http')
+                    ? Image.network(img,
+                        height: 60, width: double.infinity, fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _placeholderBox())
+                    : Image.file(File(img),
+                        height: 60, width: double.infinity, fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _placeholderBox()),
               )
             else
-              Container(
-                height: 60, width: double.infinity,
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.person_rounded, size: 30, color: AppColors.textSecondary),
-              ),
+              _placeholderBox(),
             const SizedBox(height: 8),
-            Text(item.name, style: const TextStyle(
-              fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textPrimary),
+            Text(item.name,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13,
+                  color: AppColors.textPrimary),
               textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _placeholderBox() {
+    return Container(
+      height: 60, width: double.infinity,
+      decoration: BoxDecoration(
+        color: AppColors.surface, borderRadius: BorderRadius.circular(8)),
+      child: const Icon(Icons.person_rounded, size: 30, color: AppColors.textSecondary),
     );
   }
 
@@ -537,8 +559,7 @@ class _BracketEditorScreenState extends State<BracketEditorScreen> {
             color: item1.id == winner.id ? AppColors.accent : AppColors.textSecondary)),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 8),
-            child: Text('vs', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-          ),
+            child: Text('vs', style: TextStyle(fontSize: 11, color: AppColors.textSecondary))),
           Text(item2.name, style: TextStyle(fontSize: 13,
             fontWeight: item2.id == winner.id ? FontWeight.w700 : FontWeight.normal,
             color: item2.id == winner.id ? AppColors.accent : AppColors.textSecondary)),
@@ -556,6 +577,7 @@ class _ContestantChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final img = item.displayImage;
     return Container(
       constraints: const BoxConstraints(maxWidth: 100),
       decoration: BoxDecoration(
@@ -566,17 +588,22 @@ class _ContestantChip extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (item.imagePath != null)
+          if (img != null)
             ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
-              child: Image.file(File(item.imagePath!),
-                height: 60, width: 100, fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(height: 60, color: AppColors.surfaceLight)),
+              child: img.startsWith('http')
+                  ? Image.network(img,
+                      height: 60, width: 100, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(height: 60, color: AppColors.surfaceLight))
+                  : Image.file(File(img),
+                      height: 60, width: 100, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(height: 60, color: AppColors.surfaceLight)),
             ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
             child: Text(item.name,
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary),
               maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
           ),
         ],

@@ -2,10 +2,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
 import '../models/tier_list.dart';
-import '../services/storage_service.dart';
+import '../services/firestore_service.dart';
+import '../services/cloud_storage_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/tier_row.dart';
 import 'item_detail_screen.dart';
@@ -20,6 +19,7 @@ class TierListEditorScreen extends StatefulWidget {
 class _TierListEditorScreenState extends State<TierListEditorScreen> {
   late TierList _tl;
   final _picker = ImagePicker();
+  bool _saving = false;
 
   @override
   void initState() {
@@ -28,15 +28,70 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
   }
 
   Future<void> _save() async {
-    _tl.updatedAt = DateTime.now();
-    await StorageService.saveSingle(_tl);
+    setState(() => _saving = true);
+    try {
+      await FirestoreService.saveSingle(_tl);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save failed: $e'),
+              backgroundColor: AppColors.error,
+              behavior: SnackBarBehavior.floating),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  // ── Pick image and upload to Firebase Storage ───
+  Future<String?> _pickAndUploadImage(BuildContext ctx) async {
+    final source = await _showImageSourceDialog(ctx);
+    if (source == null) return null;
+
+    final picked = await _picker.pickImage(
+        source: source, maxWidth: 800, imageQuality: 85);
+    if (picked == null) return null;
+
+    try {
+      final url =
+          await CloudStorageService.uploadItemImage(File(picked.path));
+      return url;
+    } catch (e) {
+      // Storage not configured yet — silently return null (local path used as fallback)
+      return null;
+    }
+  }
+
+  Future<ImageSource?> _showImageSourceDialog(BuildContext ctx) {
+    return showDialog<ImageSource>(
+      context: ctx,
+      builder: (c) => SimpleDialog(
+        title: const Text('Choose Image'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(c, ImageSource.camera),
+            child: const Row(children: [
+              Icon(Icons.camera_alt_rounded), SizedBox(width: 12), Text('Camera')
+            ]),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(c, ImageSource.gallery),
+            child: const Row(children: [
+              Icon(Icons.photo_library_rounded), SizedBox(width: 12), Text('Gallery')
+            ]),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Add Item bottom sheet ───────────────────────
   Future<void> _addItem() async {
     final nameCtrl = TextEditingController();
     final descCtrl = TextEditingController();
-    String? imagePath;
+    String? imageUrl;
+    bool uploadingImage = false;
 
     final result = await showModalBottomSheet<TierItem>(
       context: context,
@@ -68,35 +123,46 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
                 Text('Add New Pick',
                     style: Theme.of(context).textTheme.headlineMedium),
                 const SizedBox(height: 16),
+
                 // Image picker
                 GestureDetector(
-                  onTap: () async {
-                    final source = await _pickImageSource(ctx);
-                    if (source == null) return;
-                    final picked = await _picker.pickImage(
-                        source: source, maxWidth: 600);
-                    if (picked != null) {
-                      final dir = await getApplicationDocumentsDirectory();
-                      final ext = p.extension(picked.path);
-                      final dest = p.join(dir.path,
-                          'peakpicks_${DateTime.now().millisecondsSinceEpoch}$ext');
-                      await File(picked.path).copy(dest);
-                      setSheetState(() => imagePath = dest);
-                    }
-                  },
+                  onTap: uploadingImage
+                      ? null
+                      : () async {
+                          final source = await _showImageSourceDialog(ctx);
+                          if (source == null) return;
+                          setSheetState(() => uploadingImage = true);
+                          final picked = await _picker.pickImage(
+                              source: source, maxWidth: 800, imageQuality: 85);
+                          if (picked != null) {
+                            try {
+                              final url =
+                                  await CloudStorageService.uploadItemImage(
+                                      File(picked.path));
+                              setSheetState(() {
+                                imageUrl = url;
+                                uploadingImage = false;
+                              });
+                            } catch (_) {
+                              setSheetState(() => uploadingImage = false);
+                            }
+                          } else {
+                            setSheetState(() => uploadingImage = false);
+                          }
+                        },
                   child: Container(
                     height: 120, width: double.infinity,
                     decoration: BoxDecoration(
                       color: AppColors.surfaceLight,
                       borderRadius: BorderRadius.circular(12),
-                      image: imagePath != null
-                          ? DecorationImage(
-                              image: FileImage(File(imagePath!)),
-                              fit: BoxFit.cover)
-                          : null,
                     ),
-                    child: imagePath == null
-                        ? Column(
+                    clipBehavior: Clip.antiAlias,
+                    child: uploadingImage
+                        ? const Center(child: CircularProgressIndicator())
+                        : imageUrl != null
+                            ? Image.file(File(imageUrl!), fit: BoxFit.cover,
+                                width: double.infinity, height: 120)
+                        : Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(Icons.add_photo_alternate_rounded,
@@ -105,8 +171,7 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
                               Text('Tap to add image',
                                   style: Theme.of(context).textTheme.bodySmall),
                             ],
-                          )
-                        : null,
+                          ),
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -128,11 +193,13 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
                   child: ElevatedButton(
                     onPressed: () {
                       if (nameCtrl.text.trim().isEmpty) return;
-                      Navigator.pop(ctx, TierItem(
-                        name: nameCtrl.text.trim(),
-                        description: descCtrl.text.trim(),
-                        imagePath: imagePath,
-                      ));
+                      Navigator.pop(
+                          ctx,
+                          TierItem(
+                            name: nameCtrl.text.trim(),
+                            description: descCtrl.text.trim(),
+                            imageUrl: imageUrl,
+                          ));
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.accent,
@@ -157,31 +224,6 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
     }
   }
 
-  Future<ImageSource?> _pickImageSource(BuildContext ctx) {
-    return showDialog<ImageSource>(
-      context: ctx,
-      builder: (c) => SimpleDialog(
-        title: const Text('Choose Image'),
-        children: [
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(c, ImageSource.camera),
-            child: const Row(children: [
-              Icon(Icons.camera_alt_rounded), SizedBox(width: 12),
-              Text('Camera')
-            ]),
-          ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(c, ImageSource.gallery),
-            child: const Row(children: [
-              Icon(Icons.photo_library_rounded), SizedBox(width: 12),
-              Text('Gallery')
-            ]),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ── Move item between tiers ─────────────────────
   void _moveItem(TierItem item, String? fromTierId, String? toTierId) {
     setState(() {
@@ -201,7 +243,7 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
     _save();
   }
 
-  // ── Tap-to-move: show tier picker bottom sheet ──
+  // ── Tap-to-move: show tier picker ──────────────
   void _showMovePicker(TierItem item, String? currentTierId) {
     HapticFeedback.lightImpact();
     showModalBottomSheet(
@@ -229,7 +271,6 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
               Text('Move "${item.name}"',
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
-              // Tier options
               ..._tl.tiers.map((tier) {
                 final isCurrent = tier.id == currentTierId;
                 return Padding(
@@ -312,7 +353,7 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
     );
   }
 
-  void _viewItem(TierItem item, String? tierId) async {
+  Future<void> _viewItem(TierItem item, String? tierId) async {
     final result = await Navigator.push<dynamic>(
       context,
       MaterialPageRoute(
@@ -330,7 +371,8 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
         } else {
           _tl.tiers
               .firstWhere((t) => t.id == tierId)
-              .items.removeWhere((i) => i.id == item.id);
+              .items
+              .removeWhere((i) => i.id == item.id);
         }
       });
       _save();
@@ -355,6 +397,14 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
       appBar: AppBar(
         title: Text(_tl.title),
         actions: [
+          if (_saving)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: SizedBox(
+                width: 20, height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.add_circle_outline_rounded),
             tooltip: 'Add Item',
@@ -377,8 +427,7 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
             ..._tl.tiers.map((tier) => TierRow(
                   tier: tier,
                   onItemTap: (item) => _viewItem(item, tier.id),
-                  onItemLongPress: (item) =>
-                      _showMovePicker(item, tier.id),
+                  onItemLongPress: (item) => _showMovePicker(item, tier.id),
                   onAcceptItem: (item, fromTierId) =>
                       _moveItem(item, fromTierId, tier.id),
                 )),
@@ -428,7 +477,8 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
                   const Text('Unranked',
                       style: TextStyle(
                           color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w600, fontSize: 14)),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14)),
                   const Spacer(),
                   Text('${_tl.unrankedItems.length} items',
                       style: Theme.of(context).textTheme.bodySmall),
@@ -450,7 +500,8 @@ class _TierListEditorScreenState extends State<TierListEditorScreen> {
               ] else
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
-                  child: Text('Long-press items to move, or drag them here',
+                  child: Text(
+                      'Long-press items to move, or drag them here',
                       style: Theme.of(context).textTheme.bodySmall),
                 ),
             ],
@@ -479,7 +530,8 @@ class DraggableItemChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final child = ItemChipWidget(item: item, onTap: onTap, onLongPress: onLongPress);
+    final child =
+        ItemChipWidget(item: item, onTap: onTap, onLongPress: onLongPress);
     return LongPressDraggable<Map<String, dynamic>>(
       data: {'item': item, 'fromTierId': fromTierId},
       delay: const Duration(milliseconds: 300),
@@ -508,6 +560,7 @@ class ItemChipWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final displayImg = item.displayImage;
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -520,28 +573,42 @@ class ItemChipWidget extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (item.imagePath != null)
+            if (displayImg != null)
               ClipRRect(
                 borderRadius:
                     const BorderRadius.vertical(top: Radius.circular(9)),
-                child: Image.file(
-                  File(item.imagePath!),
-                  height: 65, width: 110,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                    height: 65, color: AppColors.surfaceLight,
-                    child: const Icon(Icons.broken_image_rounded, size: 24),
-                  ),
-                ),
+                child: displayImg.startsWith('http')
+                    ? Image.network(
+                        displayImg,
+                        height: 65, width: 110,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          height: 65, color: AppColors.surfaceLight,
+                          child: const Icon(Icons.broken_image_rounded,
+                              size: 24),
+                        ),
+                      )
+                    : Image.file(
+                        File(displayImg),
+                        height: 65, width: 110,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          height: 65, color: AppColors.surfaceLight,
+                          child: const Icon(Icons.broken_image_rounded,
+                              size: 24),
+                        ),
+                      ),
               ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
               child: Text(
                 item.name,
                 style: const TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.w600,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                     color: AppColors.textPrimary),
-                maxLines: 2, overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
               ),
             ),

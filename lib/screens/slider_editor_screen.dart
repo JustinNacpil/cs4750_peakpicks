@@ -2,10 +2,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
 import '../models/tier_list.dart';
-import '../services/storage_service.dart';
+import '../services/firestore_service.dart';
+import '../services/cloud_storage_service.dart';
 import '../theme/app_theme.dart';
 import 'item_detail_screen.dart';
 
@@ -27,14 +26,16 @@ class _SliderEditorScreenState extends State<SliderEditorScreen> {
   }
 
   Future<void> _save() async {
-    _tl.updatedAt = DateTime.now();
-    await StorageService.saveSingle(_tl);
+    try {
+      await FirestoreService.saveSingle(_tl);
+    } catch (_) {}
   }
 
   Future<void> _addItem() async {
     final nameCtrl = TextEditingController();
     final descCtrl = TextEditingController();
-    String? imagePath;
+    String? imageUrl;
+    bool uploadingImage = false;
 
     final result = await showModalBottomSheet<TierItem>(
       context: context,
@@ -54,56 +55,78 @@ class _SliderEditorScreenState extends State<SliderEditorScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Center(child: Container(width: 40, height: 4,
-                  decoration: BoxDecoration(color: AppColors.textSecondary.withValues(alpha: 0.3),
+                  decoration: BoxDecoration(
+                    color: AppColors.textSecondary.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(2)))),
                 const SizedBox(height: 16),
                 Text('Add New Pick', style: Theme.of(context).textTheme.headlineMedium),
                 const SizedBox(height: 16),
                 GestureDetector(
-                  onTap: () async {
-                    final source = await showDialog<ImageSource>(context: ctx,
-                      builder: (c) => SimpleDialog(title: const Text('Choose Image'), children: [
-                        SimpleDialogOption(onPressed: () => Navigator.pop(c, ImageSource.camera),
-                          child: const Row(children: [Icon(Icons.camera_alt_rounded), SizedBox(width: 12), Text('Camera')])),
-                        SimpleDialogOption(onPressed: () => Navigator.pop(c, ImageSource.gallery),
-                          child: const Row(children: [Icon(Icons.photo_library_rounded), SizedBox(width: 12), Text('Gallery')])),
-                      ]));
+                  onTap: uploadingImage ? null : () async {
+                    final source = await showDialog<ImageSource>(
+                      context: ctx,
+                      builder: (c) => SimpleDialog(
+                        title: const Text('Choose Image'),
+                        children: [
+                          SimpleDialogOption(
+                            onPressed: () => Navigator.pop(c, ImageSource.camera),
+                            child: const Row(children: [Icon(Icons.camera_alt_rounded), SizedBox(width: 12), Text('Camera')])),
+                          SimpleDialogOption(
+                            onPressed: () => Navigator.pop(c, ImageSource.gallery),
+                            child: const Row(children: [Icon(Icons.photo_library_rounded), SizedBox(width: 12), Text('Gallery')])),
+                        ]));
                     if (source == null) return;
-                    final picked = await _picker.pickImage(source: source, maxWidth: 600);
+                    final picked = await _picker.pickImage(source: source, maxWidth: 800, imageQuality: 85);
                     if (picked != null) {
-                      final dir = await getApplicationDocumentsDirectory();
-                      final ext = p.extension(picked.path);
-                      final dest = p.join(dir.path, 'peakpicks_${DateTime.now().millisecondsSinceEpoch}$ext');
-                      await File(picked.path).copy(dest);
-                      setSheetState(() => imagePath = dest);
+                      setSheetState(() => uploadingImage = true);
+                      try {
+                        final url = await CloudStorageService.uploadItemImage(File(picked.path));
+                        setSheetState(() { imageUrl = url; uploadingImage = false; });
+                      } catch (_) {
+                        setSheetState(() => uploadingImage = false);
+                      }
                     }
                   },
-                  child: Container(height: 100, width: double.infinity,
-                    decoration: BoxDecoration(color: AppColors.surfaceLight,
-                      borderRadius: BorderRadius.circular(12),
-                      image: imagePath != null ? DecorationImage(image: FileImage(File(imagePath!)), fit: BoxFit.cover) : null),
-                    child: imagePath == null
-                        ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            Icon(Icons.add_photo_alternate_rounded, size: 32, color: AppColors.textSecondary),
-                            const SizedBox(height: 4),
-                            Text('Tap to add image', style: Theme.of(context).textTheme.bodySmall)])
-                        : null),
+                  child: Container(
+                    height: 100, width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(12)),
+                    clipBehavior: Clip.antiAlias,
+                    child: uploadingImage
+                        ? const Center(child: CircularProgressIndicator())
+                        : imageUrl != null
+                            ? Image.file(File(imageUrl!), fit: BoxFit.cover,
+                                width: double.infinity, height: 100)
+                            : Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                Icon(Icons.add_photo_alternate_rounded, size: 32, color: AppColors.textSecondary),
+                                const SizedBox(height: 4),
+                                Text('Tap to add image', style: Theme.of(context).textTheme.bodySmall)])),
                 ),
                 const SizedBox(height: 12),
-                TextField(controller: nameCtrl, textCapitalization: TextCapitalization.words,
+                TextField(
+                  controller: nameCtrl,
+                  textCapitalization: TextCapitalization.words,
                   decoration: const InputDecoration(hintText: 'Item name')),
                 const SizedBox(height: 10),
-                TextField(controller: descCtrl, maxLines: 2,
+                TextField(
+                  controller: descCtrl,
+                  maxLines: 2,
                   decoration: const InputDecoration(hintText: 'Description (optional)')),
                 const SizedBox(height: 14),
-                SizedBox(width: double.infinity, height: 48,
+                SizedBox(
+                  width: double.infinity, height: 48,
                   child: ElevatedButton(
                     onPressed: () {
                       if (nameCtrl.text.trim().isEmpty) return;
-                      Navigator.pop(ctx, TierItem(name: nameCtrl.text.trim(),
-                        description: descCtrl.text.trim(), imagePath: imagePath));
+                      Navigator.pop(ctx, TierItem(
+                        name: nameCtrl.text.trim(),
+                        description: descCtrl.text.trim(),
+                        imageUrl: imageUrl,
+                      ));
                     },
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.accent,
                       foregroundColor: AppColors.background,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                     child: const Text('Add Pick', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -148,7 +171,8 @@ class _SliderEditorScreenState extends State<SliderEditorScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Center(child: Container(width: 40, height: 4,
-              decoration: BoxDecoration(color: AppColors.textSecondary.withValues(alpha: 0.3),
+              decoration: BoxDecoration(
+                color: AppColors.textSecondary.withValues(alpha: 0.3),
                 borderRadius: BorderRadius.circular(2)))),
             const SizedBox(height: 16),
             Text('Place "${item.name}" on the scale',
@@ -174,7 +198,9 @@ class _SliderEditorScreenState extends State<SliderEditorScreen> {
                     color: isCurrent ? AppColors.textSecondary : AppColors.textPrimary)),
                   trailing: isCurrent ? const Icon(Icons.check_rounded, color: AppColors.accent, size: 20) : null,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  tileColor: isCurrent ? AppColors.surfaceLight.withValues(alpha: 0.5) : AppColors.surfaceLight,
+                  tileColor: isCurrent
+                      ? AppColors.surfaceLight.withValues(alpha: 0.5)
+                      : AppColors.surfaceLight,
                   onTap: isCurrent ? null : () {
                     Navigator.pop(ctx);
                     _moveToTier(item, currentTierId, tier.id);
@@ -195,7 +221,8 @@ class _SliderEditorScreenState extends State<SliderEditorScreen> {
       appBar: AppBar(
         title: Text(_tl.title),
         actions: [
-          IconButton(icon: const Icon(Icons.add_circle_outline_rounded),
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline_rounded),
             onPressed: _addItem),
         ],
       ),
@@ -209,12 +236,9 @@ class _SliderEditorScreenState extends State<SliderEditorScreen> {
                 child: Text(_tl.description, style: Theme.of(context).textTheme.bodyMedium),
               ),
             const SizedBox(height: 16),
-            // Gradient slider bar
             _buildSliderBar(),
             const SizedBox(height: 20),
-            // Tier zones with items
             ..._tl.tiers.asMap().entries.map((e) => _buildZone(e.key, e.value)),
-            // Unranked
             _buildUnranked(),
           ],
         ),
@@ -245,10 +269,12 @@ class _SliderEditorScreenState extends State<SliderEditorScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(_tl.tiers.last.label,
-                  style: TextStyle(fontSize: 11, color: Color(_tl.tiers.last.colorValue),
+                  style: TextStyle(fontSize: 11,
+                      color: Color(_tl.tiers.last.colorValue),
                       fontWeight: FontWeight.w600)),
               Text(_tl.tiers.first.label,
-                  style: TextStyle(fontSize: 11, color: Color(_tl.tiers.first.colorValue),
+                  style: TextStyle(fontSize: 11,
+                      color: Color(_tl.tiers.first.colorValue),
                       fontWeight: FontWeight.w600)),
             ],
           ),
@@ -268,7 +294,6 @@ class _SliderEditorScreenState extends State<SliderEditorScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Zone header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
@@ -288,7 +313,6 @@ class _SliderEditorScreenState extends State<SliderEditorScreen> {
               ],
             ),
           ),
-          // Items
           if (tier.items.isNotEmpty)
             Padding(
               padding: const EdgeInsets.all(8),
@@ -321,7 +345,8 @@ class _SliderEditorScreenState extends State<SliderEditorScreen> {
             Padding(
               padding: const EdgeInsets.all(14),
               child: Text('No items yet',
-                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary.withValues(alpha: 0.5))),
+                  style: TextStyle(fontSize: 12,
+                      color: AppColors.textSecondary.withValues(alpha: 0.5))),
             ),
         ],
       ),
@@ -376,6 +401,7 @@ class _SliderItemChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final displayImg = item.displayImage;
     return Container(
       constraints: const BoxConstraints(maxWidth: 100),
       decoration: BoxDecoration(
@@ -386,18 +412,26 @@ class _SliderItemChip extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (item.imagePath != null)
+          if (displayImg != null)
             ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
-              child: Image.file(File(item.imagePath!),
-                height: 60, width: 100, fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(height: 60, color: AppColors.surfaceLight,
-                  child: const Icon(Icons.broken_image_rounded, size: 22))),
+              child: displayImg.startsWith('http')
+                  ? Image.network(displayImg,
+                      height: 60, width: 100, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        height: 60, color: AppColors.surfaceLight,
+                        child: const Icon(Icons.broken_image_rounded, size: 22)))
+                  : Image.file(File(displayImg),
+                      height: 60, width: 100, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        height: 60, color: AppColors.surfaceLight,
+                        child: const Icon(Icons.broken_image_rounded, size: 22))),
             ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
             child: Text(item.name,
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary),
               maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
           ),
         ],

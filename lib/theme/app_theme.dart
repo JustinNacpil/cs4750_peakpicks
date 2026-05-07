@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 
 class AppColors {
-  // Dark teal palette inspired by the PeakPicks branding
-  static const Color background = Color(0xFF0D1B2A);
-  static const Color surface = Color(0xFF1B2838);
-  static const Color surfaceLight = Color(0xFF243447);
-  static const Color accent = Color(0xFF00BFA6); // teal accent
-  static const Color accentLight = Color(0xFF64FFDA);
-  static const Color textPrimary = Color(0xFFF5F5F5);
-  static const Color textSecondary = Color(0xFFB0BEC5);
-  static const Color error = Color(0xFFEF5350);
-  static const Color divider = Color(0xFF37474F);
+  // Deep monochrome dark palette
+  static const Color background  = Color(0xFF080A0C); // near-black
+  static const Color surface     = Color(0xFF111518); // dark card
+  static const Color surfaceLight= Color(0xFF1C2128); // slightly lighter
+  static const Color accent      = Color(0xFF00C896); // teal-green stays as brand pop
+  static const Color accentLight = Color(0xFF4DFFD2);
+  static const Color textPrimary = Color(0xFFF0F2F4);
+  static const Color textSecondary = Color(0xFF8B949E);
+  static const Color error       = Color(0xFFEF5350);
+  static const Color divider     = Color(0xFF21262D);
 }
 
 ThemeData buildAppTheme() {
@@ -25,7 +25,7 @@ ThemeData buildAppTheme() {
       error: AppColors.error,
     ),
     appBarTheme: const AppBarTheme(
-      backgroundColor: AppColors.surface,
+      backgroundColor: AppColors.background,
       foregroundColor: AppColors.textPrimary,
       elevation: 0,
       centerTitle: true,
@@ -38,8 +38,11 @@ ThemeData buildAppTheme() {
     ),
     cardTheme: CardThemeData(
       color: AppColors.surface,
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: AppColors.divider, width: 1),
+      ),
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
     ),
     floatingActionButtonTheme: const FloatingActionButtonThemeData(
@@ -53,35 +56,38 @@ ThemeData buildAppTheme() {
         borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide.none,
       ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppColors.divider, width: 1),
+      ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
       ),
       hintStyle: const TextStyle(color: AppColors.textSecondary),
+      labelStyle: const TextStyle(color: AppColors.textSecondary),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     ),
     textTheme: const TextTheme(
       headlineLarge: TextStyle(
-          fontWeight: FontWeight.w800,
-          fontSize: 28,
+          fontWeight: FontWeight.w800, fontSize: 28,
           color: AppColors.textPrimary),
       headlineMedium: TextStyle(
-          fontWeight: FontWeight.w700,
-          fontSize: 22,
+          fontWeight: FontWeight.w700, fontSize: 22,
           color: AppColors.textPrimary),
       titleMedium: TextStyle(
-          fontWeight: FontWeight.w600,
-          fontSize: 16,
+          fontWeight: FontWeight.w600, fontSize: 16,
           color: AppColors.textPrimary),
-      bodyMedium:
-          TextStyle(fontSize: 14, color: AppColors.textSecondary),
-      bodySmall:
-          TextStyle(fontSize: 12, color: AppColors.textSecondary),
+      bodyMedium: TextStyle(fontSize: 14, color: AppColors.textSecondary),
+      bodySmall:  TextStyle(fontSize: 12, color: AppColors.textSecondary),
     ),
     dividerColor: AppColors.divider,
     dialogTheme: DialogThemeData(
       backgroundColor: AppColors.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    ),
+    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      backgroundColor: AppColors.surface,
     ),
   );
 }

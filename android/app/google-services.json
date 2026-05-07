@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "443559260917",
+    "project_id": "peakpicks",
+    "storage_bucket": "peakpicks.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:443559260917:android:447733c9e3a868351d8bbc",
+        "android_client_info": {
+          "package_name": "com.example.cs4750_peakpicks"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDq4bF4EtPMlA6Z4r09zaE5l6xBlx8mudY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:443559260917:android:0189a3c7e151e95c1d8bbc",
+        "android_client_info": {
+          "package_name": "com.peakpicks.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDq4bF4EtPMlA6Z4r09zaE5l6xBlx8mudY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

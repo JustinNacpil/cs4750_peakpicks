@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/tier_list.dart';
-import '../services/storage_service.dart';
+import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/peak_picks_logo.dart';
 import 'create_tier_list_screen.dart';
@@ -27,12 +27,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _load() async {
-    final lists = await StorageService.loadAll();
-    if (mounted) {
-      setState(() {
-        _lists = lists;
-        _loading = false;
-      });
+    if (mounted) setState(() => _loading = true);
+    try {
+      final lists = await FirestoreService.loadAll();
+      if (mounted) setState(() { _lists = lists; _loading = false; });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load lists: $e'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -47,7 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
         screen = TierListEditorScreen(tierList: tl);
     }
     await Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
-    _load();
+    _load(); // Refresh after returning from editor
   }
 
   Future<void> _createNew() async {
@@ -56,8 +65,8 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(builder: (_) => const CreateTierListScreen()),
     );
     if (result != null) {
-      await StorageService.saveSingle(result);
-      _openEditor(result);
+      await FirestoreService.saveSingle(result);
+      if (mounted) _openEditor(result);
     }
   }
 
@@ -68,16 +77,20 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Delete Tier List'),
         content: Text('Delete "${tl.title}"? This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true),
-              style: TextButton.styleFrom(foregroundColor: AppColors.error),
-              child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
     if (confirm == true) {
-      await StorageService.delete(tl.id);
+      await FirestoreService.delete(tl.id);
       _load();
     }
   }
@@ -102,9 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   int _totalItems(TierList tl) {
     int count = tl.unrankedItems.length;
-    for (final tier in tl.tiers) {
-      count += tier.items.length;
-    }
+    for (final tier in tl.tiers) count += tier.items.length;
     return count;
   }
 
@@ -114,7 +125,10 @@ class _HomeScreenState extends State<HomeScreen> {
       body: _tabIndex == 0 ? _buildHomeBody() : const ProfileScreen(),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
-        onDestinationSelected: (i) => setState(() => _tabIndex = i),
+        onDestinationSelected: (i) {
+          setState(() => _tabIndex = i);
+          if (i == 0) _load(); // Refresh when coming back to home
+        },
         backgroundColor: AppColors.surface,
         indicatorColor: AppColors.accent.withValues(alpha: 0.15),
         destinations: const [
@@ -144,7 +158,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return SafeArea(
       child: Column(
         children: [
-          // Custom app bar
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
             child: PeakPicksLogo(height: 38),
@@ -152,9 +165,10 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : _lists.isEmpty
-                    ? _buildEmpty()
-                    : _buildList(),
+                : RefreshIndicator(
+                    onRefresh: _load,
+                    child: _lists.isEmpty ? _buildEmpty() : _buildList(),
+                  ),
           ),
         ],
       ),
@@ -162,25 +176,33 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildEmpty() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.format_list_bulleted_rounded,
-              size: 72, color: AppColors.textSecondary.withValues(alpha: 0.4)),
-          const SizedBox(height: 16),
-          Text('No tier lists yet',
-              style: Theme.of(context).textTheme.headlineMedium),
-          const SizedBox(height: 8),
-          Text('Tap "New List" to create your first one',
-              style: Theme.of(context).textTheme.bodyMedium),
-        ],
-      ),
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        SizedBox(
+          height: MediaQuery.of(context).size.height * 0.6,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.format_list_bulleted_rounded,
+                  size: 72,
+                  color: AppColors.textSecondary.withValues(alpha: 0.4)),
+              const SizedBox(height: 16),
+              Text('No tier lists yet',
+                  style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 8),
+              Text('Tap "New List" to create your first one',
+                  style: Theme.of(context).textTheme.bodyMedium),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildList() {
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.only(top: 8, bottom: 100),
       itemCount: _lists.length,
       itemBuilder: (_, i) {
@@ -210,12 +232,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
-                    // Style icon
                     Container(
                       width: 44, height: 44,
                       decoration: BoxDecoration(
                         color: tl.tiers.isNotEmpty
-                            ? Color(tl.tiers.first.colorValue).withValues(alpha: 0.15)
+                            ? Color(tl.tiers.first.colorValue)
+                                .withValues(alpha: 0.15)
                             : AppColors.surfaceLight,
                         borderRadius: BorderRadius.circular(12),
                       ),

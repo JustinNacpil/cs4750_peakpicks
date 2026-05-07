@@ -1,4 +1,4 @@
-package com.example.cs4750_peakpicks
+package com.peakpicks.app
 
 import io.flutter.embedding.android.FlutterActivity
 
